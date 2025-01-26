@@ -1,10 +1,6 @@
-# Integrate TiDB Vector Search with SQLAlchemy ORM
-
-This is a simple demo to show how to integrate TiDB Vector Search with the SQLAlchemy ORM to search for similar text in a TiDB Serverless cluster.
-
 ## Prerequisites
 
-- A running TiDB Serverless cluster with vector search enabled
+- A running MO instance or cluster with vector search and full text search enabled
 - Python 3.8 or later
 
 ## Run the example
@@ -12,13 +8,13 @@ This is a simple demo to show how to integrate TiDB Vector Search with the SQLAl
 ### Clone this repo
 
 ```bash
-git clone https://github.com/pingcap/tidb-vector-python.git
+git clone git@github.com:ck89119/mo-vector-python.git
 ```
 
 ### Create a virtual environment
 
 ```bash
-cd tidb-vector-python/examples/orm-sqlalchemy-quickstart
+cd mo-vector-python/examples/orm-sqlalchemy-quickstart
 python3 -m venv .venv
 source .venv/bin/activate
 ```
@@ -30,18 +26,7 @@ pip install -r requirements.txt
 ```
 
 ### Set the environment variables
-
-Create a `.env` file via the following command.
-
-```shell
-cp .env.example .env
-```
-
-Copy the `HOST`, `PORT`, `USERNAME`, `PASSWORD`, `DATABASE`, and `CA` parameters from the TiDB Cloud console (see [Prerequisites](../README.md#prerequisites)), and then replace the placeholders in the `.env` file.
-
-```bash
-TIDB_DATABASE_URL=mysql+pymysql://<USERNAME>:<PASSWORD>@<HOST>:4000/<DATABASE>?ssl_ca=<CA>&ssl_verify_cert=true&ssl_verify_identity=true
-```
+Copy the `HOST`, `PORT`, `USERNAME`, `PASSWORD`, `DATABASE` to the `.env` file.
 
 ### Run this example
 

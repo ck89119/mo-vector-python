@@ -321,20 +321,22 @@ class MoVectorClient:
         self,
         query_vector: List[float],
         key_words: List[str] = None,
+        rerank_option: Optional[dict] = None,
         k: int = 5,
         filter: Optional[dict] = None,
         **kwargs: Any,
     ) -> List[QueryResult]:
-        # 将返回结果转换成list
         vector_result = self._vector_search(query_vector, k, filter, **kwargs)
         full_text_result = self._fulltext_search(key_words, k, filter, **kwargs)
 
-        # return the reranked data
-        rerank_option = {
-            "rerank_type": "RRF",
-            "rank_value": 60,
-            "rerank_score_threshold": 1,
-        }
+        # default rerank_option
+        if rerank_option is None:
+            rerank_option = {
+                "rerank_type": "RRF",
+                "rank_value": 60,
+                "rerank_score_threshold": 1,
+            }
+
         return rerank_data(
             [doc.document for doc in vector_result],
             [doc.document for doc in full_text_result],

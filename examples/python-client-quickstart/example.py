@@ -4,7 +4,6 @@ from mo_vector.client import MoVectorClient
 from sentence_transformers import SentenceTransformer
 from dotenv import load_dotenv
 
-
 # Step 1. Initialize embedding model
 print("Downloading and loading the embedding model...")
 os.environ['HTTP_PROXY'] = 'http://127.0.0.1:1089'
@@ -81,9 +80,8 @@ vector_store.insert(
     metadatas=[doc["metadata"] for doc in documents],
 )
 
+
 # Step 4. Perform vector search to find the most semantically similar documents to the query.
-
-
 def print_result(query, result):
     print(f"Search result (\"{query}\"):")
     for r in result:
@@ -99,10 +97,22 @@ print_result(query, search_result)
 
 
 # Step 5. mix query
-vector_store.create_full_text_index()
-search_result = vector_store.mix_query(query_embedding, ["dog"], k=3)
-print(search_result)
+def print_mix_result(query, keywords, result):
+    print(f"Search result (\"{query}, {keywords}\"):")
+    for r in result:
+        print(f"- text: \"{r[1]}\", score: {r[0]}")
 
+
+vector_store.create_full_text_index()
+keywords = ["dog"]
+# rrf
+rerank_option_rrf = {"rerank_type": "RRF", "rank_value": 60}
+search_result = vector_store.mix_query(query_embedding, keywords, rerank_option_rrf, k=3)
+print_mix_result(query, keywords, search_result)
+# weighted
+rerank_option_weighted = {"rerank_type": "WeightedRank", "weighted_score": [0.8, 0.2], "rerank_score_threshold": 1}
+search_result = vector_store.mix_query(query_embedding, keywords, rerank_option_weighted, k=3)
+print_mix_result(query, keywords, search_result)
 
 # Step 6. delete
 vector_store.delete(ids=[doc["id"] for doc in documents])

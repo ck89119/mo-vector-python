@@ -111,9 +111,9 @@ def rerank_data(
     rerank_option: dict[str, any]
 ):
     rerank_type = rerank_option["rerank_type"]
-    rank_value = rerank_option["rank_value"]
+    rank_value = rerank_option.get("rank_value", 0)
     weighted_score = rerank_option.get("weighted_score", [])
-    rerank_score_threshold = rerank_option["rerank_score_threshold"]
+    rerank_score_threshold = rerank_option.get("rerank_score_threshold", 0)
 
     if rerank_type == 'RRF':
         return rrf_rerank(vector_data, full_text_data, k, rank_value)
@@ -183,8 +183,10 @@ def weighted_rank(
 
     # 合并两个检索模型的结果
     all_results = []
-    all_results.extend([(score, text, "vector") for score, text in vector_query_result])  # 向量检索结果
-    all_results.extend([(score, text, "full_text") for score, text in full_text_query_result])  # 全文检索结果
+    # 向量检索结果
+    all_results.extend([(score, text, "vector") for score, text in enumerate(vector_query_result, start=1)])
+    # 全文检索结果
+    all_results.extend([(score, text, "full_text") for score, text in enumerate(full_text_query_result, start=1)])
 
     # 计算加权得分
     doc_score_map = {}
