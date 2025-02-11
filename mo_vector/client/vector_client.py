@@ -9,7 +9,7 @@ from typing import Type, Tuple, Any, Dict, Generator, Iterable, List, Optional
 import sqlalchemy
 from sqlalchemy.orm import Session, declarative_base
 
-from mo_vector.sqlalchemy import VectorType
+from mo_vector.sqlalchemy import VectorType, VectorAdaptor
 from mo_vector.client.utils import (
     get_embedding_column_definition,
     EmbeddingColumnMismatchError,
@@ -23,7 +23,7 @@ class DistanceStrategy(str, enum.Enum):
     """Enumerator of the Distance strategies."""
 
     L2 = "l2"
-    COSINE = "cosine"
+    # COSINE = "cosine"
     # INNER_PRODUCT = "inner_product"
 
 
@@ -52,7 +52,6 @@ def _create_vector_table_model(
         embedding = sqlalchemy.Column(
             VectorType(dim),  # Using the VectorType to store the vector data
             nullable=False,  # Assuming non-nullability as before
-            comment="" if distance is None else f"hnsw(distance={distance})",
         )
         document = sqlalchemy.Column(sqlalchemy.Text, nullable=True)
         meta = sqlalchemy.Column(sqlalchemy.JSON, nullable=True)
@@ -181,6 +180,11 @@ class MoVectorClient:
             self.drop_table()
         with Session(self._bind) as session, session.begin():
             self._orm_base.metadata.create_all(session.get_bind())
+        # create vector index
+        VectorAdaptor(self._bind).create_vector_index(
+            self._table_model.embedding,
+            skip_existing=True,
+        )
 
     def drop_table(self) -> None:
         """Drops the table if it exists."""
@@ -203,12 +207,12 @@ class MoVectorClient:
         """
         if self._distance_strategy == DistanceStrategy.L2:
             return self._table_model.embedding.l2_distance
-        elif self._distance_strategy == DistanceStrategy.COSINE:
-            return self._table_model.embedding.cosine_distance
+        # elif self._distance_strategy == DistanceStrategy.COSINE:
+        #     return self._table_model.embedding.cosine_distance
         # elif self._distance_strategy == DistanceStrategy.INNER_PRODUCT:
         #    return self._table_model.embedding.negative_inner_product
         elif self._distance_strategy is None:  # default to cosine
-            return self._table_model.embedding.cosine_distance
+            return self._table_model.embedding.l2_distance
         else:
             raise ValueError(
                 f"Got unexpected value for distance: {self._distance_strategy}. "
@@ -280,26 +284,27 @@ class MoVectorClient:
         query_vector: List[float],
         k: int = 5,
         filter: Optional[dict] = None,
+        dis_lower_bound: Optional[float] = None,
+        dis_upper_bound: Optional[float] = None,
         **kwargs: Any,
-    ) -> List[QueryResult]:
+    ) -> List:
         """
         Perform a similarity search with score based on the given query.
 
         Args:
-            query (str): The query string.
-            k (int, optional): The number of results to return. Defaults to 5.
-            filter (dict, optional): A filter to apply to the search results.
-                Defaults to None.
-            post_filter_enabled (bool, optional): Whether to apply the post-filtering.
-                MO cannot utilize Vector Index when query contains a pre-filter.
-            post_filter_multiplier (int, optional): A multiplier to increase the initial
-                number of results fetched before applying the filter. Defaults to 1.
+            query_vector (str):
+            k (int, optional):
             **kwargs: Additional keyword arguments.
+            :param query_vector: The query vector.
+            :param k: The number of results to return. Defaults to 5.
+            :param filter: meta filter to apply to the search results. Defaults to None.
+            :param dis_lower_bound: distance lower bound to filter the search results. Defaults to None.
+            :param dis_upper_bound: distance upper bound to filter the search results. Defaults to None.
 
         Returns:
             A list of tuples containing relevant documents and their similarity scores.
         """
-        relevant_docs = self._vector_search(query_vector, k, filter, **kwargs)
+        relevant_docs = self._vector_search(query_vector, k, filter, dis_lower_bound, dis_upper_bound, **kwargs)
 
         return [
             QueryResult(
@@ -311,11 +316,35 @@ class MoVectorClient:
             for doc in relevant_docs
         ]
 
-    def create_full_text_index(self):
-        with Session(self._bind) as session, session.begin():
-            index_name = f"ftidx_document"
-            query = sqlalchemy.text(f'create fulltext index {index_name} on {self._table_name}(document)')
-            session.execute(query)
+    def batch_query(
+        self,
+        query_vectors: List[List[float]],
+        k: int = 5,
+        filter: Optional[dict] = None,
+        dis_lower_bound: Optional[float] = None,
+        dis_upper_bound: Optional[float] = None,
+        **kwargs: Any,
+    ) -> List[List[QueryResult]]:
+        return [self.query(query, k, filter, dis_lower_bound, dis_upper_bound, **kwargs) for query in query_vectors]
+
+    def full_text_query(
+        self,
+        key_words: List[str] = None,
+        k: int = 5,
+        filter: Optional[dict] = None,
+        **kwargs: Any,
+    ) -> List:
+        full_text_result = self._fulltext_search(key_words, k, filter, **kwargs)
+
+        return [
+            QueryResult(
+                id=record[0],
+                metadata=record[1],
+                document=record[2],
+                distance=record[3],
+            )
+            for record in full_text_result
+        ]
 
     def mix_query(
         self,
@@ -324,9 +353,11 @@ class MoVectorClient:
         rerank_option: Optional[dict] = None,
         k: int = 5,
         filter: Optional[dict] = None,
+        dis_lower_bound: Optional[float] = None,
+        dis_upper_bound: Optional[float] = None,
         **kwargs: Any,
     ) -> List[QueryResult]:
-        vector_result = self._vector_search(query_vector, k, filter, **kwargs)
+        vector_result = self._vector_search(query_vector, k, filter, dis_lower_bound, dis_upper_bound, **kwargs)
         full_text_result = self._fulltext_search(key_words, k, filter, **kwargs)
 
         # default rerank_option
@@ -339,7 +370,7 @@ class MoVectorClient:
 
         return rerank_data(
             [doc.document for doc in vector_result],
-            [doc.document for doc in full_text_result],
+            [doc[2] for doc in full_text_result],
             k,
             rerank_option,
         )
@@ -349,56 +380,31 @@ class MoVectorClient:
         query_embedding: List[float],
         k: int = 5,
         filter: Optional[Dict[str, str]] = None,
+        dis_lower_bound: Optional[float] = None,
+        dis_upper_bound: Optional[float] = None,
         **kwargs: Any,
-    ) -> List[QueryResult]:
+    ) -> List:
         """vector search from table."""
 
-        post_filter_enabled = kwargs.get("post_filter_enabled", False)
-        post_filter_multiplier = kwargs.get("post_filter_multiplier", 1)
         with Session(self._bind) as session:
-            if post_filter_enabled is False or not filter:
-                filter_by = self._build_filter_clause(filter)
-                results = (
-                    session.query(
-                        self._table_model.id,
-                        self._table_model.meta,
-                        self._table_model.document,
-                        self.distance_strategy(query_embedding).label("distance"),
-                    )
-                    .filter(filter_by)
-                    .order_by(sqlalchemy.asc("distance"))
-                    .limit(k)
-                    .all()
+            filter_by = self._build_filter_clause(filter)
+            distance_col = self.distance_strategy(query_embedding).label("distance")
+
+            results = (
+                session.query(
+                    self._table_model.id,
+                    self._table_model.meta,
+                    self._table_model.document,
+                    distance_col,
                 )
-            else:
-                # Caused by the mo vector search plan limited, this post_filter_multiplier is used to
-                # improve the search performance temporarily.
-                # Notice the return count may be less than k in this situation.
-                subquery = (
-                    session.query(
-                        self._table_model.id,
-                        self._table_model.meta,
-                        self._table_model.document,
-                        self.distance_strategy(query_embedding).label("distance"),
-                    )
-                    .order_by(sqlalchemy.asc("distance"))
-                    .limit(post_filter_multiplier * k * 10)
-                    .subquery()
-                )
-                filter_by = self._build_filter_clause(filter, subquery.c)
-                results = (
-                    session.query(
-                        subquery.c.id,
-                        subquery.c.meta,
-                        subquery.c.document,
-                        subquery.c.distance,
-                    )
-                    .filter(filter_by)
-                    .order_by(sqlalchemy.asc(subquery.c.distance))
-                    .limit(k)
-                    .all()
-                )
-        return results
+                .filter(filter_by)
+                .filter(distance_col >= dis_lower_bound if dis_lower_bound else True)
+                .filter(distance_col <= dis_upper_bound if dis_upper_bound else True)
+                .order_by(sqlalchemy.asc("distance"))
+                .limit(k)
+                .all()
+            )
+            return results
 
     def _build_filter_clause(
         self,
@@ -531,20 +537,25 @@ class MoVectorClient:
         k: int = 5,
         filter: Optional[Dict[str, str]] = None,
         **kwargs: Any,
-    ) -> List[QueryResult]:
+    ) -> List:
         """fulltext search from table."""
         keywords_string = " ".join([f"+{keyword}" for keyword in keywords])
-        sql = f"select id, match(document) against('{keywords_string}' in boolean mode) as score, document from {self._table_name} limit {k}"
-        return [
-            QueryResult(
-                document=document,
-                metadata=None,
-                id=id,
-                distance=score,
-            )
-            for id, score, document in self.execute(sql)["result"]
-        ]
 
+        with Session(self._bind) as session:
+            filter_by = self._build_filter_clause(filter)
+            results = (
+                session.query(
+                    sqlalchemy.text("id"),
+                    sqlalchemy.text("meta"),
+                    sqlalchemy.text("document"),
+                    sqlalchemy.text(f"match(document) against('{keywords_string}' in boolean mode)"),
+                )
+                .select_from(self._table_model)
+                .filter(filter_by)
+                .limit(k)
+                .all()
+            )
+        return results
 
     def execute(self, sql: str, params: Optional[dict] = None) -> dict:
         """
@@ -596,3 +607,16 @@ class MoVectorClient:
             # Log the error or handle it as needed
             logger.error(f"SQL execution error: {str(e)}")
             return {"success": False, "result": None, "error": str(e)}
+
+    def create_full_text_index(self):
+        with Session(self._bind) as session, session.begin():
+            query = sqlalchemy.text(f'set experimental_fulltext_index=1')
+            session.execute(query)
+
+            index_name = f"ftidx_document"
+            query = sqlalchemy.text(f'create fulltext index {index_name} on {self._table_name}(document)')
+            session.execute(query)
+
+            index_name = f"ftidx_meta"
+            query = sqlalchemy.text(f'create fulltext index {index_name} on {self._table_name}(meta) with parser json')
+            session.execute(query)

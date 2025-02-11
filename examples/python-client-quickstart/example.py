@@ -49,15 +49,9 @@ documents = [
     },
     {
         "id": "f8e7dee2-63b6-42f1-8b60-2d46710c1972",
-        "text": "aa dog",
-        "embedding": text_to_embedding("aa dog"),
-        "metadata": {"category": "animal"},
-    },
-    {
-        "id": "f8e7dee2-63b6-42f1-8b60-2d46710c1973",
-        "text": "bb dog",
-        "embedding": text_to_embedding("bb dog"),
-        "metadata": {"category": "animal"},
+        "text": "hot dog",
+        "embedding": text_to_embedding("hot dog"),
+        "metadata": {"category": "food"},
     },
     {
         "id": "8dde1fbc-2522-4ca2-aedf-5dcb2966d1c6",
@@ -86,34 +80,66 @@ def print_result(query, result):
     print(f"Search result (\"{query}\"):")
     for r in result:
         print(f"- text: \"{r.document}\", distance: {r.distance}")
+    print("-----------------------------")
 
 
 query = "a swimming animal"
 query_embedding = text_to_embedding(query)
+print(f"vector query")
 search_result = vector_store.query(query_embedding, k=3)
 print_result(query, search_result)
+print(f"vector query with meta filter")
 search_result = vector_store.query(query_embedding, k=3, filter={"category": "\"animal\""})
 print_result(query, search_result)
+print(f"vector query, distance in range [1.0, 1.2]")
+search_result = vector_store.query(query_embedding, k=3, dis_lower_bound=1.0, dis_upper_bound=1.2)
+print_result(query, search_result)
+
+query1 = "a plant"
+query_embedding1 = text_to_embedding(query1)
+print(f"batch vector query")
+search_results = vector_store.batch_query([query_embedding, query_embedding1], k=3)
+for q, search_result in zip([query, query1], search_results):
+    print_result(q, search_result)
 
 
-# Step 5. mix query
-def print_mix_result(query, keywords, result):
-    print(f"Search result (\"{query}, {keywords}\"):")
+# Step 5. full text query
+def print_full_text_result(keywords, result):
+    print(f"Search result (keywords: {keywords}\"):")
     for r in result:
-        print(f"- text: \"{r[1]}\", score: {r[0]}")
+        print(f"- text: \"{r.document}\", score: {r.distance}")
+    print("-----------------------------")
 
 
 vector_store.create_full_text_index()
 keywords = ["dog"]
+print(f"full text query")
+search_result = vector_store.full_text_query(keywords, k=3)
+print_full_text_result(keywords, search_result)
+print(f"full text query with meta filter")
+search_result = vector_store.full_text_query(keywords, k=3, filter={"category": "\"animal\""})
+print_full_text_result(keywords, search_result)
+
+
+# Step 6. mix query
+def print_mix_result(query, keywords, result):
+    print(f"Search result (query: \"{query}, keywords: {keywords}\"):")
+    for r in result:
+        print(f"- text: \"{r[1]}\", score: {r[0]}")
+    print("-----------------------------")
+
+
 # rrf
+print(f"mix query with rrf")
 rerank_option_rrf = {"rerank_type": "RRF", "rank_value": 60}
 search_result = vector_store.mix_query(query_embedding, keywords, rerank_option_rrf, k=3)
 print_mix_result(query, keywords, search_result)
 # weighted
+print(f"mix query with weighted")
 rerank_option_weighted = {"rerank_type": "WeightedRank", "weighted_score": [0.8, 0.2], "rerank_score_threshold": 1}
 search_result = vector_store.mix_query(query_embedding, keywords, rerank_option_weighted, k=3)
 print_mix_result(query, keywords, search_result)
 
-# Step 6. delete
+
+# Step 7. delete
 vector_store.delete(ids=[doc["id"] for doc in documents])
-# vector_store.delete(ids=[doc["id"] for doc in documents], filter={"category": "\"plant\""})

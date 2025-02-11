@@ -58,6 +58,8 @@ class VectorAdaptor:
                 f"vec_idx_{column.name}"
             )
 
+            query = sqlalchemy.text("SET experimental_ivf_index = 1")
+            conn.execute(query)
             query = sqlalchemy.text(
                 f'create index {index_name} using ivfflat on {table_name}({column_name}) lists=1000 op_type "vector_l2_ops"'
             )
